@@ -16,16 +16,6 @@ type Variable struct {
 	IsConst    bool
 }
 
-func NewVariable(_type string, _name string, _vis string, _static bool, _const bool) *Variable {
-	return &Variable{
-		Type:       _type,
-		Name:       _name,
-		Visibility: _vis,
-		IsStatic:   _static,
-		IsConst:    _const,
-	}
-}
-
 type Function struct {
 	Type       string
 	Name       string
@@ -52,85 +42,79 @@ type Class struct {
 	IsStruct  bool
 }
 
-func check(e error) {
-	if e != nil {
-		panic(e)
-	}
-}
-
-func parseClassBody(body *string, currentClass *Class) {
-	var rgx_ACCESS string = `^\s*(?:public|private|protected):`
-	var rgx_DECLFUNC string = `((?:\w+(?:::\w+)*(?:<(?:[^<>]|(?1))*>)?(?:\s*[*&])?\s+)+)(\w+)\s*\((.*?)\)(\s*const)?`
-	var rgx_DECLVAR string = `((?:\w+\s+)*)((?:[\w_:]|<(?:[^<>]|(?2))*>|,\s*)+)( *[*&] +| +[*&] *| +)*([A-Za-z_]\w*)`
-
+func parseClassBody(body string, currentClass *Class) error {
+	const (
+		rgx_ACCESS   = `^\s*(?:public|private|protected):`
+		rgx_DECLFUNC = `((?:\w+(?:::\w+)*(?:<(?:[^<>]|(?1))*>)?(?:\s*[*&])?\s+)+)(\w+)\s*\((.*?)\)(\s*const)?`
+		rgx_DECLVAR  = `((?:\w+\s+)*)((?:[\w_:]|<(?:[^<>]|(?2))*>|,\s*)+)( *[*&] +| +[*&] *| +)*([A-Za-z_]\w*)`
+	)
 	re_ACCESS := regexp.MustCompile(rgx_ACCESS)
 	re_DECLFUNC := regexp.MustCompile(rgx_DECLFUNC)
 	re_DECLVAR := regexp.MustCompile(rgx_DECLVAR)
-
-	fmt.Printf("Body of %s\n-------\n%s\n", currentClass.Name, *body)
 
 	var currentAccess string = "private"
 	if currentClass.IsStruct {
 		currentAccess = "public"
 	}
 
-	scanner := bufio.NewScanner((strings.NewReader(*body)))
+	scanner := bufio.NewScanner((strings.NewReader(body)))
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := strings.TrimSpace(scanner.Text())
 
-		if strings.TrimSpace(line) == "" {
+		if line == "" {
 			continue
 		}
 
-		access := strings.TrimSpace(re_ACCESS.FindString(line))
-		if access != "" {
+		if access := strings.TrimSpace(re_ACCESS.FindString(line)); access != "" {
 			currentAccess = access
 			continue
 		}
 
-		function := re_DECLFUNC.FindString(line)
-		if function != "" {
-			// parse Function
-			var f Function
-			f.Visibility = currentAccess
+		if function := re_DECLFUNC.FindString(line); function != "" {
+			f := Function{Visibility: currentAccess}
+			_ = f
 			continue
 		}
 
 		variable := re_DECLVAR.FindString(line)
 		if variable != "" {
 			// parse Variable
-			var v Variable
-			v.Visibility = currentAccess
+			v := Variable{Visibility: currentAccess}
+			_ = v
 			continue
 		}
 
 	}
 
-	// match variables
-	for _, match := range re_DECLVAR.FindAllStringSubmatch(*body, -1) {
-		fmt.Printf("%s, %s\n", match[0], match[1])
-	}
-
+	return nil
 }
 
-// naive way to do this parse -- insane assumptions for now:
-// - the file isn't too large so it reads in whole file at once... TODO: chunked reading
-// - 1 expression per line...  TODO: regex-less parser
-func Parse(fileName string) {
-	fd, err := os.ReadFile(fileName)
-	check(err)
+/*
+naive way to do this parse -- insane assumptions for now:
 
-	// Groups
-	// 1 - template;  	2 - template params; 3 - class/struct;
-	// 4 - class name; 	5 - inheritance;  	 6 - body
-	var rgxp_CLASS string = `(?s)(\s*template\s+<((?:typename|class)\s+\w+\s*,?\s*)+>)?\s*(class|struct)\s+(\w+)\s*(:(?:\s*\w+\s+\w+\s*,?)*)?{([ -~\s]+?)};`
+  - the file isn't too large so it reads in whole file at once... TODO: chunked reading
+
+  - one expression per line...  TODO: regex-less parser
+
+    Regx groups for CLASS:
+    1 - template;  	2 - template params; 3 - class/struct;
+    4 - class name; 5 - inheritance;  	 6 - body
+*/
+func Parse(fileName string) error {
+	fd, err := os.ReadFile(fileName)
+	if err != nil {
+		return fmt.Errorf("read error: %w", err)
+	}
+
+	const rgxp_CLASS = `(?s)(\s*template\s+<((?:typename|class)\s+\w+\s*,?\s*)+>)?\s*(class|struct)\s+(\w+)\s*(:(?:\s*\w+\s+\w+\s*,?)*)?{([ -~\s]+?)};`
 	re_CLASS := regexp.MustCompile(rgxp_CLASS)
 	for _, match := range re_CLASS.FindAllStringSubmatch(string(fd), -1) {
-		var currentClass Class
-		if match[3] == "struct" {
-			currentClass.IsStruct = true
+		currentClass := Class{
+			Name:     match[4],
+			IsStruct: match[3] == "struct",
 		}
-		currentClass.Name = match[4]
-		parseClassBody(&match[len(match)-1], &currentClass)
+		parseClassBody(match[len(match)-1], &currentClass)
 	}
+
+	return nil
 }
